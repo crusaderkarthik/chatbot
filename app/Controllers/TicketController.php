@@ -298,15 +298,29 @@ class TicketController extends Controller {
         $this->requirePermission('merge_tickets');
         verify_csrf();
         $sourceId = (int)$this->input('source_id');
-        if ($sourceId === (int)$id || !$sourceId) redirect('tickets/' . $id);
+
+        if (!$sourceId) {
+            flash('error', 'Please enter a ticket ID to merge.');
+            redirect('tickets/' . $id);
+        }
+        if ($sourceId === (int)$id) {
+            flash('error', 'Cannot merge a ticket into itself.');
+            redirect('tickets/' . $id);
+        }
+
+        $source = Ticket::full($sourceId);
+        if (!$source) {
+            flash('error', 'Source ticket ' . format_ticket_id($sourceId) . ' not found.');
+            redirect('tickets/' . $id);
+        }
 
         Database::execute('UPDATE comments SET ticket_id=? WHERE ticket_id=?', [$id, $sourceId]);
         Database::execute('UPDATE attachments SET ticket_id=? WHERE ticket_id=?', [$id, $sourceId]);
-        Database::insert('INSERT INTO ticket_merges (parent_id, merged_id, merged_at) VALUES (?,?,NOW())', [$id, $sourceId]);
-        Database::execute('UPDATE tickets SET deleted=1 WHERE id=?', [$sourceId]);
-        TicketHistory::log((int)$id, Auth::id(), 'merged', '', (string)$sourceId);
+        Database::execute('INSERT IGNORE INTO ticket_merges (parent_id, merged_id, merged_at) VALUES (?,?,NOW())', [$id, $sourceId, ]);
+        Database::execute('UPDATE tickets SET deleted=1, updated_at=NOW() WHERE id=?', [$sourceId]);
+        TicketHistory::log((int)$id, Auth::id(), 'merged', '', format_ticket_id($sourceId) . ' — ' . $source['subject']);
 
-        flash('success', 'Ticket merged.');
+        flash('success', format_ticket_id($sourceId) . ' merged into this ticket.');
         redirect('tickets/' . $id);
     }
 
@@ -314,10 +328,66 @@ class TicketController extends Controller {
         $this->requirePermission('create_alias');
         verify_csrf();
         $alias = $this->sanitize($this->input('alias'));
-        if ($alias) {
-            Database::insert('INSERT IGNORE INTO ticket_aliases (ticket_id, alias, created_at) VALUES (?,?,NOW())', [$id, $alias]);
+        if (!$alias) {
+            flash('error', 'Alias cannot be empty.');
+            redirect('tickets/' . $id);
         }
-        flash('success', 'Alias added.');
+        $exists = Database::fetch('SELECT id FROM ticket_aliases WHERE alias=?', [$alias]);
+        if ($exists) {
+            flash('error', 'That alias is already in use.');
+            redirect('tickets/' . $id);
+        }
+        Database::execute('INSERT INTO ticket_aliases (ticket_id, alias, created_at) VALUES (?,?,NOW())', [$id, $alias]);
+        flash('success', 'Alias "' . $alias . '" added.');
+        redirect('tickets/' . $id);
+    }
+
+    public function addDependency(string $id): void {
+        $this->requireAuth();
+        verify_csrf();
+        $dependsOnId = (int)$this->input('depends_on_id');
+        $type        = $this->input('type', 'relates_to');
+
+        $allowed = ['blocks','is_blocked_by','relates_to'];
+        if (!in_array($type, $allowed)) $type = 'relates_to';
+
+        if (!$dependsOnId) {
+            flash('error', 'Enter a valid ticket ID.');
+            redirect('tickets/' . $id);
+        }
+        if ($dependsOnId === (int)$id) {
+            flash('error', 'A ticket cannot depend on itself.');
+            redirect('tickets/' . $id);
+        }
+        $target = Ticket::full($dependsOnId);
+        if (!$target) {
+            flash('error', format_ticket_id($dependsOnId) . ' not found.');
+            redirect('tickets/' . $id);
+        }
+
+        $exists = Database::fetch(
+            'SELECT id FROM ticket_dependencies WHERE ticket_id=? AND depends_on_id=?',
+            [$id, $dependsOnId]
+        );
+        if ($exists) {
+            flash('error', 'That dependency already exists.');
+            redirect('tickets/' . $id);
+        }
+
+        Database::execute(
+            'INSERT INTO ticket_dependencies (ticket_id, depends_on_id, type) VALUES (?,?,?)',
+            [$id, $dependsOnId, $type]
+        );
+        TicketHistory::log((int)$id, Auth::id(), 'dependency_added', '', $type . ' ' . format_ticket_id($dependsOnId));
+        flash('success', 'Dependency added.');
+        redirect('tickets/' . $id);
+    }
+
+    public function deleteDependency(string $id, string $dep_id): void {
+        $this->requireAuth();
+        verify_csrf();
+        Database::execute('DELETE FROM ticket_dependencies WHERE ticket_id=? AND id=?', [$id, $dep_id]);
+        flash('success', 'Dependency removed.');
         redirect('tickets/' . $id);
     }
 

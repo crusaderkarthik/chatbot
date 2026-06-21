@@ -1,0 +1,2 @@
+-- Migration 001: Ensure update_migrations table exists (created by updater automatically, this is a no-op)
+-- Add any future schema changes below this line
