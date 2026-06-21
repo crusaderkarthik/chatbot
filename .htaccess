@@ -1,0 +1,19 @@
+Options -Indexes
+Options -MultiViews
+
+RewriteEngine On
+
+# Block direct access to sensitive directories
+RewriteRule ^app/ - [F,L]
+RewriteRule ^config/ - [F,L]
+RewriteRule ^storage/ - [F,L]
+RewriteRule ^install/.*\.php$ - [F,L]
+
+# Allow installer only from web root
+RewriteCond %{REQUEST_URI} ^/install/?$
+RewriteRule ^ - [L]
+
+# Route everything else through front controller
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
