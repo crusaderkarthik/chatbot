@@ -18,13 +18,8 @@ if (!file_exists($configFile)) {
         header('Location: /install');
         exit;
     }
-    // Handle install POST
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        require_once APP . '/Controllers/InstallController.php';
-        (new InstallController())->run();
-    } else {
-        require_once ROOT . '/install/index.php';
-    }
+    // install/index.php handles both GET and POST itself
+    require_once ROOT . '/install/index.php';
     exit;
 }
 
